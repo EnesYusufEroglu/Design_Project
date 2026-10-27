@@ -22,7 +22,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "sht31.h"
+#include "ds3231.h"
+#include "adxl345.h"
+#include "mkt.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,7 +47,15 @@
 I2C_HandleTypeDef hi2c1;
 
 /* USER CODE BEGIN PV */
-
+float sicaklik = 0.0f;
+float nem = 0.0f;
+uint8_t okuma_durumu = 0;
+DS3231_DateTime ayar_zaman;
+ADXL345_Data ivme;
+volatile uint8_t darbe_tespit_edildi = 0;
+uint32_t toplam_darbe_sayisi = 0;
+MKT_Context soguk_zincir_mkt;
+float anlik_mkt_degeri = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -92,13 +103,51 @@ int main(void)
   MX_I2C1_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  char compile_time[] = __TIME__; // "HH:MM:SS"
 
+
+  ayar_zaman.hours   = (compile_time[0] - '0') * 10 + (compile_time[1] - '0');
+  ayar_zaman.minutes = (compile_time[3] - '0') * 10 + (compile_time[4] - '0');
+  ayar_zaman.seconds = (compile_time[6] - '0') * 10 + (compile_time[7] - '0') + 5; // +5 sn yükleme payı
+
+  ayar_zaman.day     = 26;
+  ayar_zaman.month   = 10;
+  ayar_zaman.year    = 2026;
+  ayar_zaman.day_of_week = 1;
+
+  //DS3231_SetTime(&hi2c1, &ayar_zaman);
+  if (ADXL345_Init(&hi2c1) != 1) {
+      // Sensör başlatılamazsa kırmızı LED sabit yansın
+      HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_SET);
+  }
+  MKT_Init(&soguk_zincir_mkt);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  // 1. Darbe / Şok Kontrolü (Tamamen sessiz)
+		if (darbe_tespit_edildi) {
+			darbe_tespit_edildi = 0;
+			toplam_darbe_sayisi++;
+
+			// Kesme bayrağını temizle (yeni darbeleri yakalamak için şart)
+			ADXL345_ClearInterrupt(&hi2c1);
+		}
+
+		// 2. Periyodik Sensör ve Zaman Okumaları
+		okuma_durumu = SHT31_Read(&hi2c1, &sicaklik, &nem);
+		DS3231_GetTime(&hi2c1, &ayar_zaman);
+		ADXL345_ReadAccel(&hi2c1, &ivme);
+
+		// Okuma başarılıysa MKT kümülatifine ekle ve hesapla
+		if (okuma_durumu == 1) {
+			MKT_AddSample(&soguk_zincir_mkt, sicaklik);
+			anlik_mkt_degeri = MKT_Calculate(&soguk_zincir_mkt);
+		}
+
+		HAL_Delay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -228,7 +277,12 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == ADXL_INT1_Pin) // PA2 tetiklendiğinde
+	{
+		darbe_tespit_edildi = 1;
+	}
+}
 /* USER CODE END 4 */
 
 /**
