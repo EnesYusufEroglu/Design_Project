@@ -1,0 +1,5 @@
+../Core/Src/logger.c:12:6:Logger_Init	1
+../Core/Src/logger.c:19:9:Logger_AddRecord	3
+../Core/Src/logger.c:50:10:Logger_GetCount	1
+../Core/Src/logger.c:54:20:Logger_GetRecord	2
+../Core/Src/logger.c:59:6:Logger_GetLastHashHex	2

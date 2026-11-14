@@ -32,7 +32,9 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../USB_DEVICE/App/usb_device.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h \
  ../USB_DEVICE/Target/usbd_conf.h ../Core/Inc/sht31.h ../Core/Inc/main.h \
- ../Core/Inc/ds3231.h ../Core/Inc/adxl345.h ../Core/Inc/mkt.h
+ ../Core/Inc/ds3231.h ../Core/Inc/adxl345.h ../Core/Inc/mkt.h \
+ ../Core/Inc/logger.h ../Core/Inc/ds3231.h ../Core/Inc/sha256.h \
+ ../Core/Inc/flash_storage.h ../Core/Inc/logger.h ../Core/Inc/mkt.h
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
@@ -71,4 +73,10 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Core/Inc/main.h:
 ../Core/Inc/ds3231.h:
 ../Core/Inc/adxl345.h:
+../Core/Inc/mkt.h:
+../Core/Inc/logger.h:
+../Core/Inc/ds3231.h:
+../Core/Inc/sha256.h:
+../Core/Inc/flash_storage.h:
+../Core/Inc/logger.h:
 ../Core/Inc/mkt.h:
