@@ -55,7 +55,38 @@ ADXL345_Data ivme;
 volatile uint8_t darbe_tespit_edildi = 0;
 uint32_t toplam_darbe_sayisi = 0;
 MKT_Context soguk_zincir_mkt;
-float anlik_mkt_degeri = 0.0f;
+
+// --- GÜVENLİK VE DENETİM BAYRAKLARI ---
+
+// İhlal Nedenleri (Bitmask veya Bayrak olarak)
+uint8_t bayrak_mkt_ihlali    = 0; // MKT 2-8°C dışında mı?
+uint8_t bayrak_donma_riski   = 0; // Sıcaklık 0°C altına düştü mü?
+uint8_t bayrak_mekanik_darbe = 0; // Kritik şok algılandı mı?
+// --- SİSTEM DURUM MAKİNESİ (TEK YÖNLÜ) ---
+typedef enum {
+    STATE_IDLE = 0,   // Hazır / Bekleme (Soğutucuya konup iklimlenmesi bekleniyor)
+    STATE_LOGGING,    // Yolculuk / Aktif Kayıt (LED'ler kapalı, sadece kümülatif toplam)
+    STATE_FINISHED    // Teslimat / Kilitli (MKT hesaplandı, nihai LED sabit yanıyor)
+} SystemState_t;
+
+SystemState_t cihaz_durumu = STATE_IDLE;
+
+// --- SENSÖR VE MKT DEĞİŞKENLERİ ---
+DS3231_DateTime suanki_zaman;
+ADXL345_Data ivme;
+
+MKT_Context soguk_zincir_mkt;
+float nihai_mkt_degeri = 0.0f;
+
+// --- ZAMANLAYICI VE BUTON YÖNETİMİ ---
+uint32_t son_ornek_zamani   = 0;
+uint32_t son_idle_blink     = 0;
+uint32_t buton_basilma_ani  = 0;
+uint8_t  buton_basili_tutuldu = 0;
+uint8_t  komut_tetiklendi   = 0; // Tek basışta birden fazla geçişi engeller
+
+DS3231_DateTime baslatma_zamani;
+DS3231_DateTime bitirme_zamani;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -69,6 +100,121 @@ static void MX_I2C1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void Yolculugu_Baslat(void)
+{
+	HAL_Delay(10000);
+	DS3231_GetTime(&hi2c1, &baslatma_zamani);
+    // Sayaçları ve bayrakları sıfırla
+    MKT_Init(&soguk_zincir_mkt);
+    toplam_darbe_sayisi  = 0;
+    darbe_tespit_edildi  = 0;
+    bayrak_mkt_ihlali    = 0;
+    bayrak_donma_riski   = 0;
+    bayrak_mekanik_darbe = 0;
+    ADXL345_ClearInterrupt(&hi2c1);
+
+    // Kullanıcıya "Kayıt Başladı" onayı: 1 saniye sabit Yeşil LED, sonra karanlık
+    HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+    HAL_Delay(1000);
+    HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+
+    son_ornek_zamani = HAL_GetTick();
+    cihaz_durumu = STATE_LOGGING;
+}
+
+void Yolculugu_Bitir_Ve_Degerlendir(void)
+{
+	DS3231_GetTime(&hi2c1, &bitirme_zamani);
+    cihaz_durumu = STATE_FINISHED;
+
+    // MKT hesaplaması yolculuk boyunca HİÇ yapılmadı, SADECE ŞİMDİ 1 KEZ yapılıyor
+    nihai_mkt_degeri = MKT_Calculate(&soguk_zincir_mkt);
+
+    // 1. Donma kontrolü (0°C ve altı)
+    if (soguk_zincir_mkt.min_temp <= 0.0f) {
+        bayrak_donma_riski = 1;
+    }
+
+    // 2. MKT eşik kontrolü (2°C - 8°C dışı veya hiç örnek alınmadıysa)
+    if (soguk_zincir_mkt.sample_count == 0 ||
+        nihai_mkt_degeri < 2.0f || nihai_mkt_degeri > 8.0f) {
+        bayrak_mkt_ihlali = 1;
+    }
+
+    // 3. Mekanik şok kontrolü
+    if (toplam_darbe_sayisi > 0) {
+        bayrak_mekanik_darbe = 1;
+    }
+
+    // NİHAİ LED KARARI
+    if (bayrak_donma_riski || bayrak_mkt_ihlali || bayrak_mekanik_darbe) {
+        // ÜRÜN BOZULMUŞ: Kırmızı LED Sabit
+        HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_SET);
+    } else {
+        // ÜRÜN SAĞLAM: Yeşil LED Sabit
+        HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+    }
+}
+
+void Buton_Kontrol_Et(void)
+{
+    // Aktif LOW (Pull-up olduğu için basılınca GPIO_PIN_RESET okunur)
+    uint8_t buton_basili = (HAL_GPIO_ReadPin(BTN_USER_GPIO_Port, BTN_USER_Pin) == GPIO_PIN_RESET);
+
+    if (buton_basili)
+    {
+        if (!buton_basili_tutuldu) {
+            buton_basili_tutuldu = 1;
+            buton_basilma_ani = HAL_GetTick();
+            komut_tetiklendi = 0;
+        }
+
+        uint32_t basili_kalma_suresi = HAL_GetTick() - buton_basilma_ani;
+
+        // 3 saniye (3000 ms) ile 10 saniye (10000 ms) arası bilinçli basış
+        // 10 saniyeden uzun basışlar bantlama/sıkışma sabotajı sayılır ve yoksayılır
+        if (basili_kalma_suresi >= 3000 && basili_kalma_suresi <= 10000 && !komut_tetiklendi)
+        {
+            komut_tetiklendi = 1; // Elinizi çekene kadar tekrar tetiklenmesini önle
+
+            if (cihaz_durumu == STATE_IDLE) {
+                Yolculugu_Baslat();
+            }
+            else if (cihaz_durumu == STATE_LOGGING) {
+                Yolculugu_Bitir_Ve_Degerlendir();
+            }
+            // STATE_FINISHED durumunda hiçbir şey yapmaz (Tek yönlü kilit)
+        }
+    }
+    else
+    {
+        // Buton bırakıldı: Eğer LOGGING modundaysa ve kısa basış (< 1 sn) yapıldıysa
+        // Kuryeye "Cihaz aktif, pil dolu" pingi (100 ms yeşil göz kırpma) ver
+        if (buton_basili_tutuldu && !komut_tetiklendi && cihaz_durumu == STATE_LOGGING)
+        {
+            uint32_t sure = HAL_GetTick() - buton_basilma_ani;
+            if (sure >= 50 && sure < 1000) {
+                HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+                HAL_Delay(100);
+                HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+            }
+        }
+
+        buton_basili_tutuldu = 0;
+        komut_tetiklendi = 0;
+    }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == ADXL_INT1_Pin && cihaz_durumu == STATE_LOGGING)
+    {
+        darbe_tespit_edildi = 1;
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -115,39 +261,72 @@ int main(void)
   ayar_zaman.year    = 2026;
   ayar_zaman.day_of_week = 1;
 
-  //DS3231_SetTime(&hi2c1, &ayar_zaman);
+  // Başlangıçta tüm LED'leri kapat
+  HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
+
+  // İvmeölçeri başlat
   if (ADXL345_Init(&hi2c1) != 1) {
-      // Sensör başlatılamazsa kırmızı LED sabit yansın
+      // Donanım hatası varsa kırmızı LED ile uyar
       HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_SET);
   }
+
   MKT_Init(&soguk_zincir_mkt);
+  cihaz_durumu = STATE_IDLE;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  // 1. Darbe / Şok Kontrolü (Tamamen sessiz)
-		if (darbe_tespit_edildi) {
-			darbe_tespit_edildi = 0;
-			toplam_darbe_sayisi++;
+	  uint32_t simdi = HAL_GetTick();
 
-			// Kesme bayrağını temizle (yeni darbeleri yakalamak için şart)
-			ADXL345_ClearInterrupt(&hi2c1);
-		}
+	        // 1. BUTON KONTROLÜ (Her döngüde anlık taranır)
+	        Buton_Kontrol_Et();
 
-		// 2. Periyodik Sensör ve Zaman Okumaları
-		okuma_durumu = SHT31_Read(&hi2c1, &sicaklik, &nem);
-		DS3231_GetTime(&hi2c1, &ayar_zaman);
-		ADXL345_ReadAccel(&hi2c1, &ivme);
+	        // 2. DURUMA GÖRE SİSTEM DAVRANIŞI
+	        switch (cihaz_durumu)
+	        {
+	            case STATE_IDLE:
+	                // Hazır bekleme modu: Saniyede bir 50 ms yeşil göz kırpma
+	                if (simdi - son_idle_blink >= 1000) {
+	                    son_idle_blink = simdi;
+	                    HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+	                    HAL_Delay(100);
+	                    HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+	                }
+	                break;
 
-		// Okuma başarılıysa MKT kümülatifine ekle ve hesapla
-		if (okuma_durumu == 1) {
-			MKT_AddSample(&soguk_zincir_mkt, sicaklik);
-			anlik_mkt_degeri = MKT_Calculate(&soguk_zincir_mkt);
-		}
+	            case STATE_LOGGING:
+	                // A) Darbe / Şok Kesmesi Kontrolü (Sessiz)
+	                if (darbe_tespit_edildi) {
+	                    darbe_tespit_edildi = 0;
+	                    toplam_darbe_sayisi++;
+	                    ADXL345_ClearInterrupt(&hi2c1);
+	                }
 
-		HAL_Delay(1000);
+	                // B) Periyodik Veri Toplama (1000 ms'de bir - Sadece kümülatif toplam)
+	                if (simdi - son_ornek_zamani >= 1000) {
+	                    son_ornek_zamani = simdi;
+
+	                    okuma_durumu = SHT31_Read(&hi2c1, &sicaklik, &nem);
+	                    DS3231_GetTime(&hi2c1, &suanki_zaman);
+	                    ADXL345_ReadAccel(&hi2c1, &ivme);
+
+	                    if (okuma_durumu == 1) {
+	                        // Ağır logf() yok, sadece hızlı expf() kümülatif toplama
+	                        MKT_AddSample(&soguk_zincir_mkt, sicaklik);
+	                    }
+	                }
+	                break;
+
+	            case STATE_FINISHED:
+	                // Kayıt kilitlendi. LED'ler Yolculugu_Bitir_Ve_Degerlendir() içinde sabitlendi.
+	                // Burada USB CDC üzerinden gelecek masaüstü komutları dinlenecek (FAZ 3).
+	                break;
+	        }
+
+	        HAL_Delay(20); // Buton debounce ve CPU rahatlatma
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -267,6 +446,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(ADXL_INT1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : BTN_USER_Pin */
+  GPIO_InitStruct.Pin = BTN_USER_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BTN_USER_GPIO_Port, &GPIO_InitStruct);
+
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI2_IRQn);
@@ -277,12 +462,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (GPIO_Pin == ADXL_INT1_Pin) // PA2 tetiklendiğinde
-	{
-		darbe_tespit_edildi = 1;
-	}
-}
 /* USER CODE END 4 */
 
 /**

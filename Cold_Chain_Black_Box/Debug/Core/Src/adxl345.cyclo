@@ -1,0 +1,5 @@
+../Core/Src/adxl345.c:4:13:ADXL345_WriteRegister	1
+../Core/Src/adxl345.c:10:16:ADXL345_ReadRegister	1
+../Core/Src/adxl345.c:17:9:ADXL345_Init	2
+../Core/Src/adxl345.c:52:9:ADXL345_ReadAccel	3
+../Core/Src/adxl345.c:75:6:ADXL345_ClearInterrupt	1

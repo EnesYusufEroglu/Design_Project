@@ -64,6 +64,8 @@ void Error_Handler(void);
 #define ADXL_INT1_Pin GPIO_PIN_2
 #define ADXL_INT1_GPIO_Port GPIOA
 #define ADXL_INT1_EXTI_IRQn EXTI2_IRQn
+#define BTN_USER_Pin GPIO_PIN_3
+#define BTN_USER_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
