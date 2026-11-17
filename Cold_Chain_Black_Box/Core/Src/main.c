@@ -28,6 +28,7 @@
 #include "mkt.h"
 #include "logger.h"
 #include "flash_storage.h"
+#include "usb_protocol.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -169,7 +170,7 @@ void Yolculugu_Bitir_Ve_Degerlendir(void)
     }
 
     // 4. TÜM VERİYİ VE KİLİT DURUMUNU KALICI FLASH'A MÜHÜRLE
-    Flash_SaveBlackbox(STATE_FINISHED, nihai_mkt_degeri, bayrak_mkt_ihlali,
+    Flash_SaveBlackbox(STATE_FINISHED, nihai_mkt_degeri, soguk_zincir_mkt.min_temp, soguk_zincir_mkt.max_temp, bayrak_mkt_ihlali,
                        bayrak_donma_riski, bayrak_mekanik_darbe, toplam_darbe_sayisi,
                        &baslatma_zamani, &bitirme_zamani);
 
@@ -302,10 +303,13 @@ int main(void)
   ayar_zaman.minutes = (compile_time[3] - '0') * 10 + (compile_time[4] - '0');
   ayar_zaman.seconds = (compile_time[6] - '0') * 10 + (compile_time[7] - '0') + 5; // +5 sn yükleme payı
 
-  ayar_zaman.day     = 26;
-  ayar_zaman.month   = 10;
-  ayar_zaman.year    = 2026;
-  ayar_zaman.day_of_week = 1;
+  ayar_zaman.day         = 15;
+  ayar_zaman.month       = 11;
+  ayar_zaman.year        = 2026;
+  ayar_zaman.day_of_week = 7; // Pazar
+
+  // Saati DS3231 çipine yaz (SADECE BİR KEZ YÜKLE, SONRA BU SATIRI YORUMA AL!)
+  //DS3231_SetTime(&hi2c1, &ayar_zaman);
 
   // Başlangıçta tüm LED'leri kapat
   HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
@@ -327,6 +331,8 @@ int main(void)
       // Cihaz daha önce bitirilmiş! Masaüstü uygulamasından sıfırlanana kadar KİLİTLİ kal!
       cihaz_durumu         = STATE_FINISHED;
       nihai_mkt_degeri     = kayitli_veri.nihai_mkt;
+      soguk_zincir_mkt.min_temp = kayitli_veri.min_temp;
+      soguk_zincir_mkt.max_temp = kayitli_veri.max_temp;
       bayrak_mkt_ihlali    = kayitli_veri.bayrak_mkt;
       bayrak_donma_riski   = kayitli_veri.bayrak_donma;
       bayrak_mekanik_darbe = kayitli_veri.bayrak_darbe;
@@ -356,6 +362,7 @@ int main(void)
 
         // 1. BUTON KONTROLÜ (Her döngüde anlık taranır)
         Buton_Kontrol_Et();
+        USB_Proto_Process(); // Masaüstü uygulamasından gelen komutları işle
 
         // 2. DURUMA GÖRE SİSTEM DAVRANIŞI
         switch (cihaz_durumu)
@@ -509,18 +516,24 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LED_GREEN_Pin|LED_RED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LED_GREEN_Pin|LED_RED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : BTN_USER_Pin */
+  GPIO_InitStruct.Pin = BTN_USER_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BTN_USER_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED_GREEN_Pin LED_RED_Pin */
   GPIO_InitStruct.Pin = LED_GREEN_Pin|LED_RED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : ADXL_INT1_Pin */
   GPIO_InitStruct.Pin = ADXL_INT1_Pin;
@@ -528,15 +541,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(ADXL_INT1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BTN_USER_Pin */
-  GPIO_InitStruct.Pin = BTN_USER_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(BTN_USER_GPIO_Port, &GPIO_InitStruct);
-
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

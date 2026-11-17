@@ -5,7 +5,7 @@
 #include "ds3231.h"
 #include "sha256.h"
 
-#define MAX_LOG_RECORDS 800
+#define MAX_LOG_RECORDS 500
 
 typedef struct __attribute__((packed)) {
     uint32_t index;          // Kayıt sıra numarası (0, 1, 2...)

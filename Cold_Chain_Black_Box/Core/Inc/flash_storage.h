@@ -17,6 +17,8 @@ typedef struct __attribute__((packed)) {
     uint8_t  bayrak_donma;
     uint8_t  bayrak_darbe;
     float    nihai_mkt;
+    float min_temp;
+    float max_temp;
     uint32_t toplam_darbe;
     DS3231_DateTime baslatma_zamani;
     DS3231_DateTime bitirme_zamani;
@@ -24,9 +26,11 @@ typedef struct __attribute__((packed)) {
     LogRecord_t kayitlar[MAX_LOG_RECORDS]; // 1000 * 48B = 48 KB
 } BlackboxFlashData_t;
 
-void Flash_SaveBlackbox(uint8_t state, float mkt, uint8_t b_mkt, uint8_t b_donma, uint8_t b_darbe,
+void Flash_SaveBlackbox(uint8_t state, float mkt, float min_temp, float max_temp, uint8_t b_mkt, uint8_t b_donma, uint8_t b_darbe,
                         uint32_t darbe_sayisi, DS3231_DateTime *t_start, DS3231_DateTime *t_end);
 uint8_t Flash_LoadBlackbox(BlackboxFlashData_t *out_data);
 void Flash_FactoryResetForNewTrip(void);
+
+const LogRecord_t* Flash_GetRecordPtr(uint32_t idx);
 
 #endif /* INC_FLASH_STORAGE_H_ */

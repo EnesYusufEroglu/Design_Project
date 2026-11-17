@@ -65,7 +65,7 @@ main-build: Cold_Chain_Black_Box.elf secondary-outputs
 
 # Tool invocations
 Cold_Chain_Black_Box.elf Cold_Chain_Black_Box.map: $(OBJS) $(USER_OBJS) C:\projeler\ColdChainBlackBox\Design_Project\Cold_Chain_Black_Box\STM32F401RCTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Cold_Chain_Black_Box.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\projeler\ColdChainBlackBox\Design_Project\Cold_Chain_Black_Box\STM32F401RCTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Cold_Chain_Black_Box.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+	arm-none-eabi-gcc -o "Cold_Chain_Black_Box.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\projeler\ColdChainBlackBox\Design_Project\Cold_Chain_Black_Box\STM32F401RCTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Cold_Chain_Black_Box.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

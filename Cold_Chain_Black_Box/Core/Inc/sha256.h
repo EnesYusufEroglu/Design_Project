@@ -7,10 +7,10 @@
 #define SHA256_BLOCK_SIZE 32 // 256-bit = 32 bayt
 
 typedef struct {
-    uint8_t data[64];
-    uint32_t datalen;
-    uint64_t bitlen;
+    uint64_t bitlen;    // 8-byte hizalama için en üstte olmalı
     uint32_t state[8];
+    uint32_t datalen;
+    uint8_t data[64];
 } SHA256_CTX;
 
 void sha256_init(SHA256_CTX *ctx);
